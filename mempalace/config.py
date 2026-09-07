@@ -905,7 +905,9 @@ class MempalaceConfig:
         override = self._palace_path_override
         env_val = None
         if override is None:
-            env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
+            env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get(
+                "MEMPAL_PALACE_PATH"
+            )
 
         # Determine the source path WITHOUT calling canonical_palace_path yet.
         if override is not None:
