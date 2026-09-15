@@ -424,6 +424,14 @@ class TestDiaryTools:
 # unlinked. Per the contract, all of these shapes must take the same
 # fail-soft path as malformed JSON: marker consumed, status "error", count
 # 0, timestamp None, no exception raised.
+#
+# The state dir is resolved via pathlib.Path.home(). We patch that global
+# (a from-import in the exec'd mcp_server namespace) rather than setting
+# the HOME env var on purpose: on Windows Path.home() honours USERPROFILE /
+# APPDATA, not HOME, so an env-only override would point the tool at the
+# runner's real profile and the fixture file would be invisible (the
+# "quiet" / "No recent journal entry" branch). Patching home() is
+# cross-platform.
 
 
 def _write_checkpoint(home_dir, body_text):
@@ -437,12 +445,24 @@ def _write_checkpoint(home_dir, body_text):
     return ack
 
 
+def _patch_home(mcp_server, monkeypatch, tmp_path):
+    """Point mcp_server.Path.home() at tmp_path (cross-platform)."""
+    from pathlib import Path
+
+    class _Home(Path):
+        @classmethod
+        def home(cls):
+            return Path(str(tmp_path))
+
+    monkeypatch.setattr(mcp_server, "Path", _Home)
+
+
 def test_filed_away_null_root_is_error(monkeypatch, tmp_path):
     from pathlib import Path
 
     from mempalace import mcp_server
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_home(mcp_server, monkeypatch, tmp_path)
     ack = _write_checkpoint(tmp_path, "null")
 
     result = mcp_server.tool_memories_filed_away()
@@ -458,7 +478,7 @@ def test_filed_away_array_root_is_error(monkeypatch, tmp_path):
 
     from mempalace import mcp_server
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_home(mcp_server, monkeypatch, tmp_path)
     ack = _write_checkpoint(tmp_path, "[]")
 
     result = mcp_server.tool_memories_filed_away()
@@ -474,7 +494,7 @@ def test_filed_away_string_root_is_error(monkeypatch, tmp_path):
 
     from mempalace import mcp_server
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_home(mcp_server, monkeypatch, tmp_path)
     ack = _write_checkpoint(tmp_path, '"hello"')
 
     result = mcp_server.tool_memories_filed_away()
@@ -490,7 +510,7 @@ def test_filed_away_number_root_is_error(monkeypatch, tmp_path):
 
     from mempalace import mcp_server
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_home(mcp_server, monkeypatch, tmp_path)
     ack = _write_checkpoint(tmp_path, "42")
 
     result = mcp_server.tool_memories_filed_away()
@@ -506,7 +526,7 @@ def test_filed_away_bool_root_is_error(monkeypatch, tmp_path):
 
     from mempalace import mcp_server
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_home(mcp_server, monkeypatch, tmp_path)
     ack = _write_checkpoint(tmp_path, "true")
 
     result = mcp_server.tool_memories_filed_away()
@@ -522,7 +542,7 @@ def test_filed_away_object_root_success_unchanged(monkeypatch, tmp_path):
 
     from mempalace import mcp_server
 
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _patch_home(mcp_server, monkeypatch, tmp_path)
     ack = _write_checkpoint(tmp_path, '{"msgs": 5, "ts": "2026-01-01T00:00:00Z"}')
 
     result = mcp_server.tool_memories_filed_away()
