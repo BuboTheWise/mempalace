@@ -627,7 +627,9 @@ def test_writable_http_releases_writer_lease_after_bind_failure(monkeypatch):
     assert mcp._MCP_WRITER_LOCK_CM is None
 
 
-def test_two_sequential_writable_mutations_over_http_both_succeed(http_server, monkeypatch, tmp_path):
+def test_two_sequential_writable_mutations_over_http_both_succeed(
+    http_server, monkeypatch, tmp_path
+):
     """Regression for #2413: two sequential mutating tools/call over HTTP.
 
     The original bug (v3.5.0): the writer-lease re-entrance credit was
@@ -655,15 +657,9 @@ def test_two_sequential_writable_mutations_over_http_both_succeed(http_server, m
 
     # --- writable mode, no peer conflict ---
     monkeypatch.setattr(mcp, "_READ_ONLY", False)
-    monkeypatch.setattr(
-        mcp, "_MCP_WRITER_READ_ONLY", False
-    )
-    monkeypatch.setattr(
-        mcp, "_MCP_WRITER_LOCK_FAILED", False
-    )
-    monkeypatch.setattr(
-        mcp, "_MCP_WRITER_LOCK_ERROR", ""
-    )
+    monkeypatch.setattr(mcp, "_MCP_WRITER_READ_ONLY", False)
+    monkeypatch.setattr(mcp, "_MCP_WRITER_LOCK_FAILED", False)
+    monkeypatch.setattr(mcp, "_MCP_WRITER_LOCK_ERROR", "")
 
     # --- point config at tmp_path so mine_palace_lock has a real path ---
     monkeypatch.setattr(
