@@ -878,7 +878,7 @@ _LIST_HALLWAYS_DEFAULT_LIMIT = 200
 _LIST_HALLWAYS_MAX_LIMIT = 10000
 
 
-def tool_list_hallways(wing: str = None, limit: int | None = None):
+def tool_list_hallways(wing: str = None, limit: Optional[int] = None):
     """List within-wing hallway records, optionally filtered by wing.
 
     Returns a ``{rows, total, truncated}`` envelope so a large graph can be
