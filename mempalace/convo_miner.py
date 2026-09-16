@@ -719,6 +719,17 @@ def _extract_authored_at(filepath):
     return latest
 
 
+# Internal marker set on the exception an incremental upsert-failure rolls
+# back with (see ``_apply_incremental_pass``). The incremental call site sits
+# inside ``_file_chunks_locked``'s outer ``try`` (the legacy rebuild handler);
+# without the marker that handler would run the source-wide partial cleanup a
+# SECOND time, deleting the byte-identical drawers the incremental path was
+# preserving (PR #2439 P1: a crash must leave the existing palace untouched).
+# We keep the attribute (rather than a sentinel type) so the operator still
+# sees the backend's real error type + message.
+_INCREMENTAL_ROLLED_BACK = "_convo_incremental_rolled_back"
+
+
 def _apply_incremental_pass(
     collection,
     source_file,
@@ -728,7 +739,6 @@ def _apply_incremental_pass(
     ids,
     metas,
     room_counts_delta,
-    cleanup_partial,
 ) -> tuple:
     """Execute the incremental re-mine (bounded slice, #2336).
 
@@ -739,11 +749,15 @@ def _apply_incremental_pass(
     ``prefetch_mined_set`` still see one complete, current group.
     Returns ``(drawers_added, room_counts_delta)`` — the caller combines
     that with ``skipped=False``. On an upsert failure after the orphan
-    purge already ran, runs ``cleanup_partial`` and re-raises (the
-    partial-cleanup contract from #2122 / #2183 / #2403: a mid-file crash
-    leaves fewer drawers than it started with, so the next mine re-files
-    the full set). The metadata-only ``update()`` failure is fail-safe
-    only (wasteful, never lossy) and does NOT fall into that cleanup.
+    purge already ran, performs a *targeted* rollback: deletes only the
+    chunks that were successfully upserted in this pass before the later
+    batch failed, and leaves the unchanged byte-identical drawers (which
+    were never in the upsert set) in place. The source-wide partial
+    cleanup belongs to the legacy rebuild only — that path deletes the
+    full set before upserting, so a mid-file crash there is lossy
+    regardless (fail-safe: re-file from scratch, #2122 / #2183 / #2403).
+    The metadata-only ``update()`` failure is fail-safe only (wasteful,
+    never lossy) and does NOT fall into any cleanup.
     """
     # Purge only orphans: stored ids this pass does not rewrite
     # (the file shrank, or /compact re-chunked the head so
@@ -792,6 +806,7 @@ def _apply_incremental_pass(
             upsert_docs.append(doc)
             upsert_ids.append(drawer_id)
             upsert_metas.append(meta)
+    upserted_ok_ids: list = []
     try:
         if upsert_ids:
             # Batch bounded upserts so large transcripts keep
@@ -799,28 +814,48 @@ def _apply_incremental_pass(
             # huge Chroma/SQLite request.
             for batch_start in range(0, len(upsert_ids), DRAWER_UPSERT_BATCH_SIZE):
                 slice_end = min(batch_start + DRAWER_UPSERT_BATCH_SIZE, len(upsert_ids))
+                batch_ids = upsert_ids[batch_start:slice_end]
                 assert_no_collisions(
                     list(
-                        zip(upsert_ids[batch_start:slice_end], upsert_metas[batch_start:slice_end])
+                        zip(batch_ids, upsert_metas[batch_start:slice_end])
                     ),
                     collection,
                 )
                 try:
                     collection.upsert(
                         documents=upsert_docs[batch_start:slice_end],
-                        ids=upsert_ids[batch_start:slice_end],
+                        ids=batch_ids,
                         metadatas=upsert_metas[batch_start:slice_end],
                     )
                 except Exception as e:
                     if "already exists" not in str(e).lower():
                         raise
+                upserted_ok_ids.extend(batch_ids)
         drawers_added = len(upsert_ids)
-    except Exception:
-        # Upsert failed after the orphan purge already ran:
-        # this file now has fewer drawers than it started
-        # with, so do the partial-cleanup delete too — the
-        # next mine re-files the full set from scratch.
-        cleanup_partial()
+    except Exception as exc:
+        # Targeted rollback (PR #2439 P1): delete only the chunks this
+        # pass successfully upserted before the later batch failed. The
+        # unchanged, byte-identical drawers are NOT in upsert_ids (they
+        # were routed to skip_ids), so they survive the crash — the
+        # documented requirement that a mid-file crash leaves the
+        # existing palace untouched (#2122 / #2183 / #2403 fail-safe).
+        # The source-wide ``cleanup_partial()`` is NOT invoked here;
+        # that semantic belongs to the legacy rebuild only, where the
+        # full set was already deleted before the upsert started.
+        if upserted_ok_ids:
+            try:
+                collection.delete(ids=upserted_ok_ids)
+            except Exception:
+                logger.warning(
+                    "Failed to roll back partially-upserted convo drawers for %s",
+                    source_file,
+                    exc_info=True,
+                )
+        # Flag the exception so the outer handler in
+        # _file_chunks_locked skips its redundant source-wide
+        # cleanup — the incremental path already rolled back
+        # its own upserts above.
+        setattr(exc, _INCREMENTAL_ROLLED_BACK, True)
         raise
     else:
         # Metadata-only: no documents, no embeddings — a
@@ -1005,7 +1040,6 @@ def _file_chunks_locked(
                     ids,
                     metas,
                     room_counts_delta,
-                    _cleanup_partial,
                 )
                 return drawers_added, room_counts_delta, False
 
@@ -1043,11 +1077,19 @@ def _file_chunks_locked(
                 except Exception as e:
                     if "already exists" not in str(e).lower():
                         raise
-        except Exception:
+        except Exception as exc:
             # A successful earlier batch has the source's current mtime and
             # chunk_total. Leaving those drawers behind would make the next
             # run treat the incomplete set as fully filed (#2183 / #2122).
-            _cleanup_partial()
+            #
+            # Skip if the incremental pass already rolled back its own
+            # upserts (PR #2439 P1): ``_apply_incremental_pass`` ran a
+            # targeted delete of only the partially-upserted new chunks and
+            # left the unchanged byte-identical drawers in place — running
+            # ``_cleanup_partial()`` here would delete those survivors too,
+            # exactly the data loss this fix prevents.
+            if not getattr(exc, _INCREMENTAL_ROLLED_BACK, False):
+                _cleanup_partial()
             raise
     return drawers_added, room_counts_delta, False
 

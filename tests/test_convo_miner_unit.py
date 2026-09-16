@@ -1097,6 +1097,114 @@ class TestFileChunksLockedIncremental:
         assert stored_ids[0] in col.updated_refresh
         assert col.updated_refresh[stored_ids[0]]["chunk_total"] == 2
 
+    def test_upsert_failure_preserves_unchanged_drawers(self, monkeypatch, tmp_path):
+        """P1 (PR #2439, igorls): re-mining a file where one chunk is
+        unchanged and one new chunk's upsert fails must NOT wipe the
+        unchanged drawer. The reviewer flagged that ``_apply_incremental_pass``
+        calls the source-wide ``cleanup_partial()`` even when ``orphan_ids``
+        is empty, so a single failing new upsert deleted the unchanged prior
+        rows and left the file's collection empty — violating the documented
+        requirement that a crash leaves the existing palace untouched.
+
+        Scenario: stored chunk 0 is byte-identical to this pass (so it goes to
+        ``skip_ids``, orphans are empty); chunk 1 is new and its upsert raises.
+        After the exception propagates, chunk 0 must STILL be present and chunk
+        1 must be absent — the source-wide delete must have been skipped.
+        """
+        import mempalace.convo_miner as convo_miner
+        from mempalace.ids import make_convo_drawer_id
+
+        source = tmp_path / "chat.jsonl"
+        # Chunk 0 is stored and stays identical; chunk 1 is new (appended).
+        contents = [f"exchange 0 unchanged " * 20, "exchange 1 brand-new " * 20]
+        source.write_text("".join(contents), encoding="utf-8")
+        src = str(source)
+        self._setup(monkeypatch, tmp_path)  # install monkeypatches (no file write)
+
+        stored_ids = [make_convo_drawer_id("wing", "general", src, "exchange", 0)]
+        new_id = make_convo_drawer_id("wing", "general", src, "exchange", 1)
+        source_mtime = os.path.getmtime(src)
+        rows = {
+            stored_ids[0]: (
+                contents[0],  # byte-identical to this pass's chunk 0 -> skip
+                {
+                    "source_file": src,
+                    "extract_mode": "exchange",
+                    "ingest_mode": "convos",
+                    "normalize_version": convo_miner.NORMALIZE_VERSION,
+                    "source_mtime": source_mtime,
+                    "chunk_total": 1,
+                },
+            )
+        }
+
+        class IncrementalFailCol:
+            def __init__(self):
+                self.rows = dict(rows)
+                self.deleted = []
+
+            def get(self, ids=None, where=None, limit=None, offset=0, include=None, **kw):
+                if ids is not None:
+                    got = [(d, self.rows[d]) for d in ids if d in self.rows]
+                    return {
+                        "ids": [d for d, _v in got],
+                        "metadatas": [m for _d, (doc, m) in got],
+                    }
+                recs = list(self.rows.items())
+                if where and "source_file" in where:
+                    recs = [
+                        (d, (doc, m))
+                        for d, (doc, m) in recs
+                        if (m or {}).get("source_file") == where["source_file"]
+                    ]
+                recs = recs[offset : offset + (limit or len(recs))]
+                return {
+                    "ids": [d for d, _v in recs],
+                    "metadatas": [m for _d, (doc, m) in recs],
+                    "documents": [doc for _d, (doc, m) in recs],
+                }
+
+            def delete(self, ids=None, where=None, **kw):
+                self.deleted.extend(ids or [])
+                for drawer_id in ids or []:
+                    self.rows.pop(drawer_id, None)
+
+            def upsert(self, documents, ids, metadatas):
+                # The new chunk 1 upsert fails (chunk 0 was skipped as
+                # byte-identical and never reaches upsert). No row is written.
+                raise RuntimeError("simulated new-chunk upsert failure")
+
+        col = IncrementalFailCol()
+
+        with pytest.raises(RuntimeError, match="new-chunk upsert failure"):
+            _file_chunks_locked(
+                col,
+                src,
+                [{"content": c, "chunk_index": i} for i, c in enumerate(contents)],
+                "wing",
+                "general",
+                "agent",
+                "exchange",
+            )
+
+        # The unchanged, byte-identical prior drawer SURVIVES the failed
+        # upsert — the source-wide partial-cleanup must not have deleted it.
+        assert stored_ids[0] in col.rows, (
+            f"unchanged drawer {stored_ids[0]} was deleted by a source-wide "
+            f"cleanup after the new chunk's upsert failed; deleted={col.deleted}"
+        )
+        assert col.rows[stored_ids[0]][0] == contents[0], (
+            "the unchanged drawer's content must be preserved verbatim"
+        )
+        assert new_id not in col.rows, (
+            f"the new chunk {new_id} whose upsert failed must not be present"
+        )
+
+        # The only delete issued must not have targeted an unchanged row.
+        assert stored_ids[0] not in col.deleted, (
+            f"the unchanged drawer was explicitly deleted by cleanup: {col.deleted}"
+        )
+
 
 class TestSourceFileDeleteIds:
     """#104: the sweeper writes drawers with no extract_mode at all
