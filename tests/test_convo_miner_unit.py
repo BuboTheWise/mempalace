@@ -1116,7 +1116,7 @@ class TestFileChunksLockedIncremental:
 
         source = tmp_path / "chat.jsonl"
         # Chunk 0 is stored and stays identical; chunk 1 is new (appended).
-        contents = [f"exchange 0 unchanged " * 20, "exchange 1 brand-new " * 20]
+        contents = ["exchange 0 unchanged " * 20, "exchange 1 brand-new " * 20]
         source.write_text("".join(contents), encoding="utf-8")
         src = str(source)
         self._setup(monkeypatch, tmp_path)  # install monkeypatches (no file write)

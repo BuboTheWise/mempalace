@@ -816,9 +816,7 @@ def _apply_incremental_pass(
                 slice_end = min(batch_start + DRAWER_UPSERT_BATCH_SIZE, len(upsert_ids))
                 batch_ids = upsert_ids[batch_start:slice_end]
                 assert_no_collisions(
-                    list(
-                        zip(batch_ids, upsert_metas[batch_start:slice_end])
-                    ),
+                    list(zip(batch_ids, upsert_metas[batch_start:slice_end])),
                     collection,
                 )
                 try:
