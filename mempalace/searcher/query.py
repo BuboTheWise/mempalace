@@ -118,12 +118,39 @@ def _query_drawers_with_filter_fallback(
                 room,
                 source_file,
             )
-            return {
-                "ids": [fids],
-                "documents": [fdocs],
-                "metadatas": [fmetas],
-                "distances": [fdists],
-            }
+            if fids:
+                # The last-resort recovery surfaced real rows in the requested
+                # scope — return them. (Recovery ran via the degraded unfiltered
+                # path, but the caller gets usable matches.)
+                return {
+                    "ids": [fids],
+                    "documents": [fdocs],
+                    "metadatas": [fmetas],
+                    "distances": [fdists],
+                }
+            # No rows survived the wing/room/source_file post-filter even at
+            # the exact request width. Returning an empty result here would
+            # hand the caller a success with an ``error``-free dict, so the
+            # upstream ``_is_transient_index_error()`` check (which drives the
+            # ``#1315`` cache-reset + retry in ``tool_search``) sees ``False``
+            # and the reset never runs — the wing-filtered query that succeeds
+            # on ``develop`` after a cache reset is never attempted, and the
+            # caller sees ``results: []`` instead of ``index_recovered: true``.
+            # Surface the last captured index error instead so that recovery
+            # path engages. This is the same outcome ``develop`` produces when
+            # the filtered + wide unfiltered retries both raise: the caller's
+            # ``_is_transient_index_error`` sees the ``"Error finding id"`` /
+            # ``"internal error"`` text, forces a Chroma cache reset, sleeps, and
+            # retries the (wing-filtered) query, which then recovers.
+            raise last_err
+
+
+    # Every candidate width (filtered + unfiltered at each n) raised.
+    # Surface the last captured index error so the caller's
+    # ``_is_transient_index_error()`` sees a transient signal and the
+    # cache-reset + retry recovery path can engage — not an empty
+    # ``error``-free success dict, which would short-circuit it and
+    # leave the caller looking like "no results" instead of index-recovered.
         raise last_err
 
 
