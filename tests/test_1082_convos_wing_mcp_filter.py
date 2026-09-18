@@ -187,17 +187,27 @@ def test_progressive_fallback_gives_up_when_all_widths_fail():
         )
 
 
-def test_last_resort_fallback_empty_post_filter_emits_warning(caplog):
+def test_last_resort_fallback_empty_post_filter_raises_for_transient_recovery(caplog):
     """Last-resort fallback recovers into an EMPTY post-filter set.
 
     The filtered query fails (``"Error finding id"``), the wide unfiltered
     retry also fails, and the narrow unfiltered retry (``n_results``) succeeds
     but returns rows whose wing/room/source_file all mismatch the request —
-    so the Python-side post-filter keeps 0 rows.  Before the fix this path
-    returned an empty result silently, so the user saw ``"no results"`` with
-    no signal that recovery was degraded.  Now it must emit a WARNING that
-    reports (a) how many rows the unfiltered pool returned and (b) how many
-    survived the post-filter.
+    so the Python-side post-filter keeps 0 rows.
+
+    Before the 2026-09-17 fix this path returned an empty success
+    (``result["ids"][0] == []``) with no ``error`` key, so the upstream
+    ``_is_transient_index_error()`` check — which drives the ``#1315``
+    Chroma cache-reset + retry in ``tool_search`` — saw ``False`` and the
+    reset never ran.  A wing-filtered query that recovers on ``develop``
+    after a cache reset was never attempted, and the caller saw
+    ``results: []`` instead of ``index_recovered: true``.
+
+    Now that path must still emit the degraded-recovery WARNING (so the
+    operator sees recovery ran via the unfiltered pool with 0 survivors)
+    AND surface ``last_err`` (the captured ``"Error finding id"``) so
+    ``tool_search``'s transient-index recovery engages and the wing-filtered
+    retry can run — matching ``develop``'s ``index_recovered: true`` outcome.
     """
     convos_wing = "chats_general"
     other_wing = "sample_repo"
@@ -226,27 +236,29 @@ def test_last_resort_fallback_empty_post_filter_emits_warning(caplog):
     ]
 
     with caplog.at_level(logging.WARNING, logger="mempalace_mcp"):
-        result = _query_drawers_with_filter_fallback(
-            drawers_col=col,
-            dkwargs=_dkwargs(pool_n=20, wing=convos_wing),
-            query="decisions",
-            n_results=5,
-            wing=convos_wing,
-            room=None,
-            source_file=None,
-        )
+        with pytest.raises(Exception) as exc:
+            _query_drawers_with_filter_fallback(
+                drawers_col=col,
+                dkwargs=_dkwargs(pool_n=20, wing=convos_wing),
+                query="decisions",
+                n_results=5,
+                wing=convos_wing,
+                room=None,
+                source_file=None,
+            )
 
-    # Recovery happened but the post-filter kept nothing.
-    assert result["ids"][0] == []
-    assert result["documents"][0] == []
+    # The surfaced error is the transient "Error finding id" index error, so
+    # ``_is_transient_index_error()`` (which checks for "error finding id")
+    # returns True and ``tool_search`` runs its cache-reset + retry.
+    assert "error finding id" in str(exc.value).lower()
 
-    # A WARNING was emitted for the degraded last-resort fallback...
+    # A WARNING was still emitted for the degraded last-resort fallback,
+    # reporting both the unfiltered pool size (2 rows) and the
+    # post-filter survivor count (0 rows).
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warnings, "expected a WARNING for the degraded last-resort fallback"
     degraded = [r for r in warnings if "Last-resort fallback" in r.getMessage()]
     assert degraded, "expected the degraded-recovery WARNING (pool-vs-survivors)"
-    # ...reporting both the unfiltered pool size (2 rows) and the
-    # post-filter survivor count (0 rows).
     msg = degraded[0].getMessage()
     assert "unfiltered pool=2 row(s)" in msg
     assert "0 row(s) survived" in msg
