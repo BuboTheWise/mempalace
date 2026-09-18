@@ -144,13 +144,12 @@ def _query_drawers_with_filter_fallback(
             # retries the (wing-filtered) query, which then recovers.
             raise last_err
 
-
-    # Every candidate width (filtered + unfiltered at each n) raised.
-    # Surface the last captured index error so the caller's
-    # ``_is_transient_index_error()`` sees a transient signal and the
-    # cache-reset + retry recovery path can engage — not an empty
-    # ``error``-free success dict, which would short-circuit it and
-    # leave the caller looking like "no results" instead of index-recovered.
+        # Every candidate width (filtered + unfiltered at each n) raised.
+        # Surface the last captured index error so the caller's
+        # ``_is_transient_index_error()`` sees a transient signal and the
+        # cache-reset + retry recovery path can engage — not an empty
+        # ``error``-free success dict, which would short-circuit it and
+        # leave the caller looking like "no results" instead of index-recovered.
         raise last_err
 
 
