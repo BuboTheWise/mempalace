@@ -20,7 +20,7 @@ CLI uses — so wing-scoped MCP search on convos wings recovers a hit
 set instead of surfacing ``"Search error: Error executing plan:
 Internal error: Error finding id"``.
 
-See issue #1082, helpers at ``mempalace/searcher.py``
+See issue #1082, helpers at ``mempalace/searcher/query.py``
 (``_query_drawers_with_filter_fallback``, ``search_memories``).
 """
 
@@ -257,7 +257,7 @@ def test_last_resort_fallback_empty_post_filter_raises_for_transient_recovery(ca
     # post-filter survivor count (0 rows).
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warnings, "expected a WARNING for the degraded last-resort fallback"
-    degraded = [r for r in warnings if "Last-resort fallback" in r.getMessage()]
+    degraded = [r for r in warnings if "Filter-fallback" in r.getMessage()]
     assert degraded, "expected the degraded-recovery WARNING (pool-vs-survivors)"
     msg = degraded[0].getMessage()
     assert "unfiltered pool=2 row(s)" in msg
@@ -308,8 +308,120 @@ def test_last_resort_fallback_nonempty_post_filter_still_emits_warning(caplog):
     assert [m["wing"] for m in (result["metadatas"][0] or [{}])] == [convos_wing]
 
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    degraded = [r for r in warnings if "Last-resort fallback" in r.getMessage()]
+    degraded = [r for r in warnings if "Filter-fallback" in r.getMessage()]
     assert degraded, "expected the degraded-recovery WARNING (pool-vs-survivors)"
     msg = degraded[0].getMessage()
     assert "unfiltered pool=2 row(s)" in msg
     assert "1 row(s) survived" in msg
+
+
+# ---------------------------------------------------------------------------
+# #2462 review (igorls): allow_narrow=False — partial-survivor must raise
+# ---------------------------------------------------------------------------
+
+
+def test_allow_narrow_false_wide_partial_survivor_raises_for_recovery():
+    """With ``allow_narrow=False`` (the MCP initial call), when the wide
+    unfiltered pool succeeds but every row lands in a different wing, the
+    helper must raise the captured index error so
+    ``_is_transient_index_error()`` engages the #1315 cache-reset.
+
+    Before this fix the narrow ``n_results`` retry ran unconditionally,
+    so even when the wide pool was the only recovery path the MCP initial
+    call short-circuited ``tool_search``'s cache-reset with 0 survivors.
+    With ``allow_narrow=False`` the narrow width is blocked and the helper
+    raises the last captured error, letting the reset + retry (with
+    ``allow_narrow=True``) run.
+
+    See igorls review comment on PR #2462 (2026-09-19).
+    """
+    convos_wing = "chats_general"
+    other_wing = "sample_repo"
+    # Filtered (pool) fails; wide unfiltered (n_results * 15 = 75) succeeds
+    # with TWO rows, both in a DIFFERENT wing → post-filter = 0 survivors.
+    # With allow_narrow=False the narrow width (5) is never tried.
+    col = MagicMock()
+    col.query.side_effect = [
+        Exception("Error finding id"),  # filtered (pool width)
+        {
+            "ids": [
+                [
+                    f"drawer_{other_wing}_planning_deadbeefcafe1234567890",
+                    f"drawer_{other_wing}_planning_cafebabe1234567890",
+                ]
+            ],
+            "documents": [["planning a launch", "planning another launch"]],
+            "metadatas": [
+                [
+                    {"wing": other_wing, "room": "planning"},
+                    {"wing": other_wing, "room": "planning2"},
+                ]
+            ],
+            "distances": [[0.5, 0.6]],
+        },
+    ]
+
+    # The raised error must carry the transient-index signal so
+    # ``_is_transient_index_error()`` returns True.
+    with pytest.raises(Exception, match="Error finding id"):
+        _query_drawers_with_filter_fallback(
+            drawers_col=col,
+            dkwargs=_dkwargs(pool_n=20, wing=convos_wing),
+            query="decisions",
+            n_results=5,
+            wing=convos_wing,
+            room=None,
+            source_file=None,
+            allow_narrow=False,
+        )
+
+    # Exactly 2 col.query calls: filtered + wide.  No narrow call.
+    assert col.query.call_count == 2, (
+        f"expected 2 calls (filtered + wide); got {col.query.call_count}"
+    )
+
+
+def test_allow_narrow_false_wide_success_with_survivors_still_returns():
+    """With ``allow_narrow=False``, if the wide unfiltered pool DOES contain
+    surviving rows in the requested wing, return them immediately without
+    falling through to the narrow width.  The narrow is an extra recovery
+    step, not a gate — if wide already works, it should.
+    """
+    convos_wing = "chats_general"
+    other_wing = "sample_repo"
+    col = MagicMock()
+    col.query.side_effect = [
+        Exception("Error finding id"),  # filtered (pool width)
+        {
+            "ids": [
+                [
+                    "drawer_chats_general_decision_abc123def4567890123456",
+                    f"drawer_{other_wing}_planning_deadbeefcafe1234567890",
+                ]
+            ],
+            "documents": [["decisions on the async refactor", "planning a launch"]],
+            "metadatas": [
+                [
+                    {"wing": convos_wing, "room": "decision"},
+                    {"wing": other_wing, "room": "planning"},
+                ]
+            ],
+            "distances": [[0.4, 0.5]],
+        },
+    ]
+
+    result = _query_drawers_with_filter_fallback(
+        drawers_col=col,
+        dkwargs=_dkwargs(pool_n=20, wing=convos_wing),
+        query="decisions",
+        n_results=5,
+        wing=convos_wing,
+        room=None,
+        source_file=None,
+        allow_narrow=False,
+    )
+
+    # Exactly 2 calls: filtered fails, wide succeeds with survivors.
+    assert col.query.call_count == 2
+    assert [m["wing"] for m in (result["metadatas"][0] or [{}])] == [convos_wing]
+    assert len(result["ids"][0]) == 1
