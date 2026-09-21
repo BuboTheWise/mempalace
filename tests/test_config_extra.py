@@ -82,11 +82,13 @@ def test_collection_name_from_config(tmp_path):
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.collection_name == "custom_col"
 
+
 # ── #2451 status_protocol ────────────────────────────────────────────────────
 # Operator-supplied protocol text: `mempalace_status`'s "protocol" field is
 # otherwise hardcoded (PALACE_PROTOCOL in tools_read.py). Mirrors the
 # topic_wings / hall_keywords pattern: env takes precedence over config file,
 # and a None / empty value means "use the built-in default."
+
 
 def _write_config(tmp_path, data: dict):
     (tmp_path / "config.json").write_text(json.dumps(data), encoding="utf-8")
