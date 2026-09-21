@@ -66,7 +66,7 @@ def _tool_status_via_sqlite() -> dict:
         "total_drawers": total,
         "wings": wings,
         "rooms": rooms,
-        "protocol": PALACE_PROTOCOL,
+        "protocol": _status_protocol(),
         "aaak_dialect": AAAK_SPEC,
         "backend": "chroma",
         "vector_disabled": True,
@@ -292,7 +292,7 @@ def tool_status():
             "total_drawers": total,
             "wings": wings,
             "rooms": rooms,
-            "protocol": PALACE_PROTOCOL,
+            "protocol": _status_protocol(),
             "aaak_dialect": AAAK_SPEC,
             "backend": _selected_backend_name(),
         }
@@ -310,7 +310,7 @@ def tool_status():
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
-        "protocol": PALACE_PROTOCOL,
+        "protocol": _status_protocol(),
         "aaak_dialect": AAAK_SPEC,
         "backend": _selected_backend_name(),
     }
@@ -394,6 +394,22 @@ EXAMPLE:
 
 Read AAAK naturally — expand codes mentally, treat *markers* as emotional context.
 When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
+
+
+def _status_protocol() -> str:
+    """Resolve the protocol text ``mempalace_status`` returns (#2451).
+
+    Returns the operator-supplied override (``MEMPALACE_STATUS_PROTOCOL`` env
+    or ``status_protocol`` in config.json) when set, else the built-in
+    ``PALACE_PROTOCOL``. ``_config.status_protocol`` is read at call time via
+    ``getattr`` so test stubs that only define ``palace_path``/``backend``
+    fall back cleanly, and an empty/blank override still means "use the
+    built-in".
+    """
+    value = getattr(_config, "status_protocol", None)
+    if isinstance(value, str) and value:
+        return value
+    return PALACE_PROTOCOL
 
 
 def tool_list_wings():
