@@ -2116,7 +2116,8 @@ class TestStatusProtocolOverride:
         monkeypatch.setattr(mcp_server, "_selected_backend_name", lambda: "chroma")
 
     def test_handler_returns_override_protocol_from_config(self, tmp_path, monkeypatch):
-        """A file-config override flows all the way into the status response."""
+        """A file-config override is APPENDED to the built-in protocol — the
+        built-in text survives and the operator text is added after it."""
         from mempalace import mcp_server
         from mempalace.config import MempalaceConfig
 
@@ -2128,7 +2129,10 @@ class TestStatusProtocolOverride:
         self._force_fast_path(monkeypatch)
 
         result = mcp_server.tool_status()
-        assert result["protocol"] == "E2E OVERRIDE TEXT"
+        # Append, not replace: built-in text is always present...
+        assert result["protocol"].startswith(mcp_server.PALACE_PROTOCOL)
+        # ...and the operator override text is layered on after it.
+        assert "E2E OVERRIDE TEXT" in result["protocol"]
 
     def test_handler_returns_default_protocol_when_unset(self, tmp_path, monkeypatch):
         """Without an override the built-in PALACE_PROTOCOL is preserved —

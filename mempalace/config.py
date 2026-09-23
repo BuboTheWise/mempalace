@@ -1152,19 +1152,23 @@ class MempalaceConfig:
         """Operator-supplied status protocol text, or ``None`` to use the
         built-in default (``PALACE_PROTOCOL`` in the MCP server).
 
-        Lets an operator replace the "protocol" field returned by
-        ``mempalace_status`` without a code change (see #2451): set the
+        Lets an operator add to the "protocol" field returned by
+        ``mempalace_status`` without a code change: set the
         ``MEMPALACE_STATUS_PROTOCOL`` env, or ``status_protocol`` in
         ``config.json``. Mirrors the ``topic_wings`` / ``hall_keywords``
         pattern — env takes precedence over the config file, and a missing
         or blank value resolves to ``None`` so the consumer falls back to
-        the built-in text. Kept intentionally light here so the config layer
-        doesn't reach into the MCP server module to read ``PALACE_PROTOCOL``.
+        the built-in text. A whitespace-only env var counts as unset, so it
+        falls through to the config file instead of masking it. Kept
+        intentionally light here so the config layer doesn't reach into the
+        MCP server module to read ``PALACE_PROTOCOL``.
         """
         env_val = os.environ.get("MEMPALACE_STATUS_PROTOCOL")
         if env_val is not None:
-            value = env_val.strip()
-            return value or None
+            env_stripped = env_val.strip()
+            if env_stripped:
+                return env_stripped
+            # Blank / whitespace-only env is treated as unset: keep reading.
         file_val = self._file_config.get("status_protocol")
         if isinstance(file_val, str):
             value = file_val.strip()
