@@ -756,14 +756,28 @@ def _hallway_sort_key(hallway: dict) -> int | float:
 
 
 def list_hallways(
-    wing: Optional[str] = None, config=None, limit: Optional[int] = None
+    wing: Optional[str] = None,
+    config=None,
+    limit: Optional[int] = None,
+    sort: bool = False,
 ) -> list[dict]:
     """List hallway records. Filter by ``wing`` if specified.
 
-    Records are returned strongest-first (highest ``co_occurrence_count``
-    first) so a capped answer is always the most useful slice. When ``limit``
-    is given (a non-negative integer), only that many records are returned;
-    when it is ``None`` (the default) the full matching set is returned.
+    By default the records are returned in store (file) order — the order
+    in which they were written by the miner. This preserves the
+    first-seen-wins contract that downstream consumers such as
+    ``entity_tunnels_for_wing`` rely on: the record order there decides
+    which raw-wing display form wins a tie for a normalized wing, and
+    sorting by strength would silently change that on wing renames.
+
+    Pass ``sort=True`` for strongest-first ordering (highest
+    ``co_occurrence_count`` first) so a capped answer is always the most
+    useful slice — this is what ``tool_list_hallways`` needs before it
+    applies its limit (#2327).
+
+    When ``limit`` is given (a non-negative integer), only that many
+    records are returned; when it is ``None`` (the default) the full
+    matching set is returned.
 
     Returns a plain list; callers that need the full-match count and an
     explicit truncation signal (e.g. ``tool_list_hallways``) wrap the result
@@ -772,7 +786,8 @@ def list_hallways(
     all_hallways = _load_hallways(config)
     if wing is not None:
         all_hallways = [h for h in all_hallways if h.get("wing") == wing]
-    all_hallways = sorted(all_hallways, key=_hallway_sort_key, reverse=True)
+    if sort:
+        all_hallways = sorted(all_hallways, key=_hallway_sort_key, reverse=True)
     if limit is not None:
         # ``bool`` is a subclass of ``int`` and ``int(True)`` would silently
         # coerce it to ``1`` — reject it *before* the ``int()`` coercion below
