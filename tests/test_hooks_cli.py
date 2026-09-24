@@ -621,7 +621,8 @@ def test_stop_hook_files_checkpoint_under_harness_agent(tmp_path, harness, expec
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
     with patch(
-        "mempalace.hooks_cli._save_diary_direct", return_value={"drawers_filed": 1, "messages_folded": 5, "themes": []}
+        "mempalace.hooks_cli._save_diary_direct",
+        return_value={"drawers_filed": 1, "messages_folded": 5, "themes": []},
     ) as mock_save:
         _capture_hook_output(
             hook_stop,
@@ -2211,7 +2212,8 @@ def test_stop_hook_rejects_injected_stop_hook_active(tmp_path):
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
     with patch(
-        "mempalace.hooks_cli._save_diary_direct", return_value={"drawers_filed": 1, "messages_folded": 1, "themes": []}
+        "mempalace.hooks_cli._save_diary_direct",
+        return_value={"drawers_filed": 1, "messages_folded": 1, "themes": []},
     ) as mock_save:
         _capture_hook_output(
             hook_stop,
