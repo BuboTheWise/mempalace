@@ -291,9 +291,7 @@ class TestComputeHallways:
 
         cfgdir = tmp_path / "cfg"
         cfgdir.mkdir(exist_ok=True)
-        (cfgdir / "config.json").write_text(
-            json.dumps({"hallway_min_count": 3}), encoding="utf-8"
-        )
+        (cfgdir / "config.json").write_text(json.dumps({"hallway_min_count": 3}), encoding="utf-8")
         monkeypatch.delenv("MEMPALACE_KG_HALLWAY_MIN_COUNT", raising=False)
         cfg = MempalaceConfig(config_dir=cfgdir)
 
@@ -329,9 +327,7 @@ class TestComputeHallways:
 
         cfgdir = tmp_path / "cfg"
         cfgdir.mkdir(exist_ok=True)
-        (cfgdir / "config.json").write_text(
-            json.dumps({"hallway_min_count": 3}), encoding="utf-8"
-        )
+        (cfgdir / "config.json").write_text(json.dumps({"hallway_min_count": 3}), encoding="utf-8")
         monkeypatch.setenv("MEMPALACE_KG_HALLWAY_MIN_COUNT", "5")
         cfg = MempalaceConfig(config_dir=cfgdir)
 
