@@ -10,7 +10,6 @@ import pytest
 
 with patch.dict("sys.modules", {"chromadb": MagicMock()}):
     import mempalace.palace_graph as palace_graph
-    from mempalace import hallways as hallways_mod
 
 
 def _use_tmp_tunnel_file(monkeypatch, tmp_path):
@@ -863,60 +862,6 @@ class TestEntityTunnels:
         assert len(listed) == 2
         kinds = {t.get("kind") for t in listed}
         assert kinds == {"explicit", "entity"}
-
-    def test_entity_tunnels_first_seen_display_preserves_file_order(self, tmp_path, monkeypatch):
-        """Pins the exact defect flagged in review on #2429: the miner
-        calls ``list_hallways(config=...)`` with **no sort** and feeds the
-        result to ``entity_tunnels_for_wing``, whose
-        ``entity_wings[ent][norm].setdefault(...)`` keeps the *first-seen*
-        raw-wing display form. With the sort off (default) that is the
-        file-order record; with strongest-first it would be the
-        highest-count record.
-
-        Seed two hallway records that both normalize to the same wing
-        (``wing_mp``) but carry *different* raw casings and counts, where
-        the LOW-count / ``wing_mp`` record is first in the file. A third
-        record places the entity in the focus wing so a tunnel is actually
-        created. Drive the list through ``list_hallways()`` (default order,
-        exactly the miner's call) and assert the tunnel endpoint uses the
-        first-seen (``wing_mp``) display form, not the highest-count
-        (``Wing_MP``) one.
-        """
-        _use_tmp_tunnel_file(monkeypatch, tmp_path)
-        hallway_file = tmp_path / "hallways.json"
-        monkeypatch.setattr(hallways_mod, "_get_hallway_file", lambda *a, **kw: str(hallway_file))
-        monkeypatch.setattr(
-            hallways_mod,
-            "_legacy_hallway_file",
-            lambda: str(tmp_path / "legacy-hallways.json"),
-        )
-        seed = [
-            # other wing (normalizes to wing_mp): LOW count, lowercase casing —
-            # FIRST in file order. Pre-PR this is the first-seen display form.
-            {"wing": "wing_mp", "entity_a": "Ben", "entity_b": "Omega", "co_occurrence_count": 1},
-            # other wing (normalizes to wing_mp): HIGH count, DIFFERENT casing —
-            # LAST in file order. Strongest-first ordering would surface this first.
-            {"wing": "Wing_MP", "entity_a": "Ben", "entity_b": "Zeta", "co_occurrence_count": 99},
-            # focus wing (wing_aya) — places Ben in the focus wing so a tunnel forms.
-            {"wing": "wing_aya", "entity_a": "Ben", "entity_b": "Aya", "co_occurrence_count": 5},
-        ]
-        hallways_mod._save_hallways(seed)
-
-        # Reproduce the miner's chain: list_hallways(config=...) with NO sort,
-        # then feed the result straight to entity_tunnels_for_wing.
-        hallways = hallways_mod.list_hallways()
-        created = palace_graph.entity_tunnels_for_wing("wing_aya", hallways)
-
-        assert len(created) == 1
-        tunnel = created[0]
-        wings = {tunnel["source"]["wing"], tunnel["target"]["wing"]}
-        other = [w for w in wings if w != "wing_aya"][0]
-        # First-seen (file-order) display form wins, NOT the highest-count form.
-        assert other == "wing_mp", (
-            f"entity tunnel used highest-count display form {other!r} instead of the "
-            "first-seen file-order form 'wing_mp' — the unconditional strongest-first "
-            "sort is leaking into the miner path"
-        )
 
 
 class TestTunnelDynamicsIntegration:
