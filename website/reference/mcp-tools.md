@@ -447,9 +447,10 @@ List within-wing hallway records (entity-to-entity co-occurrence links built at 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `wing` | string | No | Filter hallways by wing |
-| `limit` | integer | No | Max hallways to return, strongest-first. Default **200**, hard cap **10000**. Bounded to keep dense wings (hallway count grows super-linearly with entity density) within the client tool budget; the response also carries `total` (full match count) and `truncated` |
+| `limit` | integer | No | Page size. Default **100**, max **500**. Strongest-first (highest `co_occurrence_count` first) so the first page is the one worth reading; a bounded slice keeps dense wings within the client tool budget. |
+| `offset` | integer | No | Offset for pagination. Default **0**. |
 
-**Returns:** `{ rows: [ { id, wing, entity_a, entity_b, co_occurrence_count, rooms, ... } ], total: <int>, truncated: <bool> }` — `rows` are the strongest-first (highest `co_occurrence_count` first) bounded records, `total` is the full matching count ignoring the cap, and `truncated` is `true` when `total > len(rows)`.
+**Returns:** `{ hallways: [ { id, wing, entity_a, entity_b, co_occurrence_count, rooms, ... } ], total: <int>, count: <int>, offset: <int>, limit: <int> }` — `hallways` is the requested page (strongest-first), `total` is the full matching count ignoring the page bound, `count` is `len(hallways)` for this page, and `offset` / `limit` echo the values that produced the page.
 
 ---
 
