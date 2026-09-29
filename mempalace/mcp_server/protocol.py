@@ -429,10 +429,12 @@ def _installed_dist_state() -> tuple[dict[str, str], dict[str, str]]:
 
 
 # Baseline: what was installed at the moment this module was imported, which is
-# the moment the code being served was loaded. Every watched distribution is
-# already in sys.modules by now — mempalace by definition, chromadb through the
-# unconditional `from chromadb.errors import NotFoundError as _ChromaNotFoundError`
-# above — so this snapshot describes the code actually running.
+# the moment the code being served was loaded. (_apply_server_flags() reads it
+# again, before the first request, if --backend changes what is watched.) Every
+# watched distribution is already in sys.modules by now — mempalace by
+# definition, chromadb through the unconditional
+# `from chromadb.errors import NotFoundError as _ChromaNotFoundError` above — so
+# this snapshot describes the code actually running.
 #
 # Both sides of the comparison are therefore read the same way, from the same
 # metadata, and that is what keeps the gate honest. Comparing a live
@@ -1179,6 +1181,37 @@ def _start_write_stall_watchdog() -> None:
     t.start()
 
 
+def _exit_running_registered_cleanup() -> None:
+    """Exit the process from a daemon thread, WITH the `atexit` handlers.
+
+    `os._exit` alone skipped them, so the idle watchdog left
+    `serverinfo.json` advertising a dead PID -- measured in #2500 at 2 days
+    8 hours of a stale record. Two handlers are registered by the time this
+    can fire: `server_registry.clear_serverinfo` (http.py) and
+    `_release_mcp_writer_lock` (_guards.py).
+
+    NOT `sys.exit(0)`, which #2500 suggests. This runs in a DAEMON THREAD,
+    where `SystemExit` unwinds that thread and nothing else -- measured: the
+    process stays alive and the watchdog, having returned out of its own
+    loop, never fires again. That trades a stale `serverinfo.json` for the
+    file-handle accumulation the watchdog exists to prevent (#1552).
+
+    `atexit._run_exitfuncs` is private, and deliberate: the public surface
+    has no "run the handlers now" and the alternative -- calling the two
+    known handlers directly from here -- silently drops any third one a
+    later change registers. A handler that raises must not keep the process
+    alive either, so the exit is in a `finally`.
+    """
+    import atexit
+
+    try:
+        atexit._run_exitfuncs()
+    except Exception:  # noqa: BLE001 - the exit is the point; cleanup is best-effort
+        logger.exception("idle-exit cleanup raised; exiting anyway")
+    finally:
+        os._exit(0)
+
+
 def _start_idle_exit_watchdog() -> None:
     """Start a daemon thread that exits the process after an idle period.
 
@@ -1204,7 +1237,7 @@ def _start_idle_exit_watchdog() -> None:
                     idle / 3600,
                     timeout / 3600,
                 )
-                os._exit(0)
+                _exit_running_registered_cleanup()
 
     t = threading.Thread(target=_watchdog, name="mcp-idle-watchdog", daemon=True)
     t.start()
