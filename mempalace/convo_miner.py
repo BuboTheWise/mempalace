@@ -1027,32 +1027,14 @@ def _file_chunks_locked(
         if file_already_mined(collection, source_file, check_mtime=True, extract_mode=extract_mode):
             return 0, room_counts_delta, True
 
-        # Purge stale drawers first. Fires both on a normalize-schema bump
-        # (file_already_mined() returned False for pre-v2 drawers) and on a
-        # changed/grown transcript (mtime differs) — clean them out so the
-        # source doesn't end up with mixed old/new drawers.
-        #
-        # A failed purge must abort this file's mine attempt rather than
-        # fall through to upsert: proceeding on top of an unpurged (or
-        # partially purged) set produces duplicate/stale drawers under
-        # mixed schema versions, with no operator-visible signal beyond a
-        # debug log (#105 — convo_miner's own instance of the same swallow
-        # already fixed for miner.py at #23). Returning here leaves the old
-        # drawers' stored mtime untouched, so the next mine still sees a
-        # mismatch and retries.
-        try:
-            delete_ids = _source_file_delete_ids(collection, source_file, extract_mode)
-            if delete_ids:
-                collection.delete(ids=delete_ids)
-        except Exception as exc:
-            print(
-                f"  ! [error] stale-drawer purge failed for {source_file!r} "
-                f"({exc!r}); leaving existing drawers untouched, will retry "
-                f"on the next mine",
-                file=sys.stderr,
-            )
-            logger.debug("Stale-drawer purge failed for %s", source_file, exc_info=True)
-            return 0, room_counts_delta, PURGE_FAILED
+        # The write-path decision (incremental vs legacy rebuild) and the
+        # legacy purge must run in that order — purging first would destroy
+        # the stored rows the incremental path needs to byte-compare, and a
+        # "purge-then-rebuild" failure would wipe the source-wide set even
+        # though the incremental path had not touched it (#2439: on a crash
+        # the unchanged drawers must survive). The legacy full-rebuild
+        # path below owns the purge and returns PURGE_FAILED if it
+        # raises (#105).
 
         # Batch chunks into bounded upserts so large transcripts keep most of
         # the embedding speedup without one huge Chroma/SQLite request. Keep
@@ -1156,13 +1138,13 @@ def _file_chunks_locked(
                     collection.delete(ids=delete_ids)
             except Exception as exc:
                 print(
-                    f"  ! [skip] stale-drawer purge failed for {source_file!r} "
+                    f"  ! [error] stale-drawer purge failed for {source_file!r} "
                     f"({exc!r}); leaving existing drawers untouched, will retry "
                     f"on the next mine",
                     file=sys.stderr,
                 )
                 logger.debug("Stale-drawer purge failed for %s", source_file, exc_info=True)
-                return 0, room_counts_delta, True
+                return 0, room_counts_delta, PURGE_FAILED
 
             # Batch the full pass into bounded upserts so large transcripts
             # keep most of the embedding speedup without one huge
