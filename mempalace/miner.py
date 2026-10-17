@@ -145,6 +145,8 @@ READABLE_EXTENSIONS = {
     ".sh",
     ".csv",
     ".sql",
+    # Prisma schema files (Prisma ORM database models)
+    ".prisma",
     ".toml",
     ".tex",
     ".bib",
