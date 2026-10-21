@@ -668,6 +668,38 @@ def test_scan_project_honours_repo_git_info_exclude_even_without_dot_gitignore()
         shutil.rmtree(tmpdir)
 
 
+@pytest.mark.parametrize("relative_gitdir", [False, True])
+@pytest.mark.parametrize("relative_common", [False, True])
+def test_scan_project_reads_linked_worktree_common_excludes(
+    tmp_path, relative_gitdir, relative_common
+):
+    project = (tmp_path / "linked").resolve()
+    common = (tmp_path / "main" / ".git").resolve()
+    admin = common / "worktrees" / "linked"
+    project.mkdir()
+    admin.mkdir(parents=True)
+    (common / "info").mkdir()
+    (common / "info" / "exclude").write_text("/local-only/\n", encoding="utf-8")
+    gitdir = os.path.relpath(admin, project) if relative_gitdir else str(admin)
+    commondir = os.path.relpath(common, admin) if relative_common else str(common)
+    (project / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    (admin / "commondir").write_text(commondir + "\n", encoding="utf-8")
+    write_file(project / "main.py", "print('source')\n" * 10)
+    write_file(project / "local-only" / "copy.py", "print('duplicate')\n" * 10)
+
+    assert scanned_files(project) == ["main.py"]
+    assert scanned_files(project, respect_gitignore=False) == ["local-only/copy.py", "main.py"]
+
+
+def test_root_gitignore_negation_overrides_common_exclude(tmp_path):
+    project = tmp_path.resolve()
+    _write_repo_exclude(project, "*.md")
+    write_file(project / ".gitignore", "!keep.md\n")
+    write_file(project / "keep.md", "keep this source\n" * 10)
+    write_file(project / "omit.md", "local-only source\n" * 10)
+    assert scanned_files(project) == ["keep.md"]
+
+
 def test_repo_exclude_does_not_reinclude_when_dir_pruned_by_skip_dirs():
     # Even if should_skip_dir already prunes .worktrees before gitignore runs,
     # the .git/info/exclude matcher agrees — both mechanisms independently drop

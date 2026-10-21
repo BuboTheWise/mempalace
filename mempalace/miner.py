@@ -402,41 +402,46 @@ def load_gitignore_matcher(dir_path: Path, cache: dict):
     return cache[dir_path]
 
 
+def _repo_common_dir(project_path: Path) -> Optional[Path]:
+    """Resolve the Git directory holding a checkout's shared exclude file."""
+    git_dir = project_path / ".git"
+    if git_dir.is_file():
+        marker = git_dir.read_text(encoding="utf-8", errors="surrogateescape").strip()
+        if not marker.startswith("gitdir:") or not marker[7:].strip():
+            return None
+        git_dir = project_path / marker[7:].strip()
+    elif not git_dir.is_dir():
+        return None
+    try:
+        common = (
+            (git_dir / "commondir").read_text(encoding="utf-8", errors="surrogateescape").strip()
+        )
+    except FileNotFoundError:
+        return git_dir
+    return git_dir / common if common else None
+
+
 def load_repo_exclude_matcher(project_path: Path, cache: dict):
-    """Load and cache the repo-level ``.git/info/exclude`` matcher.
+    """Cache common Git excludes, anchored at the checkout's project root.
 
-    git honours ``<repo>/.git/info/exclude`` in addition to per-directory
-    ``.gitignore`` files so local-only paths can stay out of version control
-    while the checked-in ``.gitignore`` stays pristine (it ships in the
-    ``.git`` directory, which is not distributed). A worktree is typically
-    listed here — or under the dedicated ``.worktrees/`` /
-    ``.claude/worktrees/`` directories that :func:`should_skip_dir` prunes —
-    because a worktree is a full copy of the source tree. Honouring this file
-    stops the miner double-mining every worktree as a second, duplicated wing
-    (MemPalace/mempalace#2599: two worktrees produced ~33k duplicate drawers).
-
-    The matcher is anchored at ``project_path`` (the repository root), so its
-    patterns apply across the whole walked tree — exactly like a root
-    ``.gitignore``. Returns ``None`` when the file is absent or contains no
-    patterns.
-
-    Uses a distinct cache key (``(project_path, "git_info_exclude")``) that can
-    never collide with a directory path, so it may safely share
-    ``matcher_cache`` with :func:`load_gitignore_matcher` — both write under
-    different keys and one cannot shadow the other's value.
+    Linked worktrees point to their administration directory through a
+    ``.git`` file, then to the shared Git directory through ``commondir``.
+    Its exclude patterns have lower precedence than per-directory gitignores.
+    The tuple cache key keeps these rules separate from directory matchers.
     """
     cache_key = (project_path, "git_info_exclude")
     if cache_key not in cache:
-        exclude_path = project_path / ".git" / "info" / "exclude"
-        if exclude_path.is_file():
-            try:
-                lines = exclude_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                cache[cache_key] = None
-            else:
-                cache[cache_key] = GitignoreMatcher.from_patterns(project_path, lines.splitlines())
-        else:
+        try:
+            common = _repo_common_dir(project_path)
+            lines = (
+                (common / "info" / "exclude").read_text(encoding="utf-8", errors="surrogateescape")
+                if common is not None
+                else ""
+            )
+        except OSError:
             cache[cache_key] = None
+        else:
+            cache[cache_key] = GitignoreMatcher.from_patterns(project_path, lines.splitlines())
     return cache[cache_key]
 
 
@@ -459,7 +464,7 @@ def should_skip_dir(dir_path: Path) -> bool:
       or ends in ``.egg-info``, is skipped outright.
     - A ``worktrees`` directory is skipped ONLY when it sits directly under a
       ``.claude`` directory (``<project>/.claude/worktrees/``). That is the
-      Claude Code worktree layout that produced the #2599 double-mining. A
+      Claude Code worktree layout containing duplicate checkouts. A
       genuine ``src/worktrees`` Python package is NOT under ``.claude`` and
       still mines.
     """
