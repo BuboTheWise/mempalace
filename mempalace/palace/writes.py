@@ -57,7 +57,7 @@ def _source_file_delete_ids(
             if not _metadata_matches_extract_mode(meta or {}, extract_mode):
                 continue
             if pass_contents is not None:
-                # Additive-history rules (PR #2799):
+                # Additive-history rules:
                 #   Rule 1 KEEP  : current schema + content not in pass_contents
                 #   Rule 2 DEL   : older schema (normalize_version < current)
                 #   Rule 3 DEL   : current schema + content IS in pass_contents

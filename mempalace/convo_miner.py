@@ -37,8 +37,6 @@ from .palace import (
     MINE_ABORTS,
     NORMALIZE_VERSION,
     SKIP_DIRS,
-    _metadata_matches_extract_mode,
-    _meta_is_current,
     _validate_palace_fts5_after_mine,
     file_already_mined,
     get_collection,
