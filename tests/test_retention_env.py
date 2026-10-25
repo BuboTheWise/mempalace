@@ -6,6 +6,7 @@ a non-integer MEMPALACE_DAEMON_RETENTION_DAYS. The module-level
 JOB_RETENTION_DAYS read must fall back to the 7-day default for bad values,
 while honoring intentional operator windows (0, -1, signed/whitespace ints).
 """
+
 import importlib
 
 import pytest
@@ -29,14 +30,14 @@ def _clean(monkeypatch):
 @pytest.mark.parametrize(
     "raw,val",
     [
-        ("abc", 7),      # non-numeric typo -> default (was: ValueError)
-        ("12.7", 7),     # float -> int fallback (was: ValueError)
-        ("30d", 7),      # unit-suffixed -> default (issue example)
-        (" ", 7),        # whitespace-only (issue: trailing space in .env)
+        ("abc", 7),  # non-numeric typo -> default (was: ValueError)
+        ("12.7", 7),  # float -> int fallback (was: ValueError)
+        ("30d", 7),  # unit-suffixed -> default (issue example)
+        (" ", 7),  # whitespace-only (issue: trailing space in .env)
         ("not-a-float", 7),
-        ("0", 0),        # intentional: keep terminal jobs
-        ("-1", -1),      # intentional: keep terminal jobs
-        (" 42 ", 42),    # leading/trailing whitespace is fine
+        ("0", 0),  # intentional: keep terminal jobs
+        ("-1", -1),  # intentional: keep terminal jobs
+        (" 42 ", 42),  # leading/trailing whitespace is fine
     ],
 )
 def test_retention_days_module_read_never_crashes(monkeypatch, raw, val):
