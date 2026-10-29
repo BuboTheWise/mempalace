@@ -24,9 +24,8 @@ See issue #1082, helpers at ``mempalace/searcher/query.py``
 (``_query_drawers_with_filter_fallback``, ``search_memories``).
 """
 
-from unittest.mock import MagicMock
-
 import logging
+from unittest.mock import MagicMock
 
 import pytest
 
