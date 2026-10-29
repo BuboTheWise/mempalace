@@ -51,17 +51,16 @@ def _query_drawers_with_filter_fallback(
     retry unfiltered (over-fetching) and re-apply the wing/room/source_file filter in Python.
     The unfiltered retry is progressive — wide recall width first, then the
     narrow ``n_results`` width (``allow_narrow``) — because on convos-mined
-    wings the wide pool can re-hit the same stale pointer (#1082), while the
+    wings the wide pool can re-hit the same stale pointer, while the
     narrow width stays out of the stale region the CLI's filtered query uses.
-    See #1245 / #1035 / #1082.
 
     ``allow_narrow`` gates the last-resort narrow retry. The MCP *initial* call
-    passes ``allow_narrow=False``: on a transient (#1315 flush-window) index the
+    passes ``allow_narrow=False``: on a transient (flush-window) index the
     narrow unfiltered top-N is dominated by other wings, so even a partial
     survivor set there would short-circuit ``tool_search``'s cache-reset +
     retry and hand the caller a thin result without ``index_recovered``. With
     the narrow width blocked the helper raises the captured index error,
-    ``_is_transient_index_error()`` engages the #1315 reset, and the
+    ``_is_transient_index_error()`` engages the transient-index reset, and the
     post-reset attempt (``allow_narrow=True``) runs last. The CLI path and the
     post-reset MCP attempt keep the narrow fallback (``allow_narrow=True``).
     """
@@ -79,7 +78,7 @@ def _query_drawers_with_filter_fallback(
         # but progressively: first at the wide recall width (broadest), then
         # narrow back to ``n_results`` — the width the CLI requests for its
         # own filtered query and which demonstrably stays out of the stale
-        # region a convos-mined wing's cluster sits in (#1082). The wide width
+        # region a convos-mined wing's cluster sits in. The wide width
         # alone was not enough: at ``n_results * 15`` breadth the convos
         # cluster IS in the top pool, so the unfiltered retry re-hit the same
         # pointer and surfaced the raw "Error finding id" to the caller.
@@ -156,7 +155,7 @@ def _query_drawers_with_filter_fallback(
             # No rows survived the wing/room/source_file post-filter at this
             # candidate width. Returning an empty result would hand the caller
             # a success with an ``error``-free dict, so the upstream
-            # ``_is_transient_index_error()`` check (which drives the ``#1315``
+            # ``_is_transient_index_error()`` check (which drives the transient-index
             # cache-reset + retry in ``tool_search``) sees ``False`` and the
             # reset never runs — the wing-filtered query that succeeds on
             # ``develop`` after a cache reset is never attempted, and the
@@ -354,7 +353,7 @@ def search_memories(
             retry the drawer query at the narrow ``n_results`` width.
             Pass False for the *initial* MCP call: with the narrow width
             blocked, a partial survivor set there would short-circuit the
-            #1315 cache-reset + retry in ``tool_search``.  The post-reset
+            transient-index cache-reset + retry in ``tool_search``.  The post-reset
             retry and the CLI path keep ``allow_narrow=True`` via default.
     """
     # Validate the strategy eagerly so invalid values fail the same way
