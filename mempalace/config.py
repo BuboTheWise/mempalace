@@ -737,7 +737,7 @@ class MempalaceConfig:
         the default 24 hex characters — the same convention the codebase uses
         for ``daemon.py`` state naming and ``server_registry.py``), so that two
         palaces whose directories share the same parent no longer collide on
-        one shared tunnel file on disk (#2710). The key reuses
+        one shared tunnel file on disk. The key reuses
         :func:`paths.palace_key` and is stable, case-insensitive.
         """
         key = paths.palace_key(self.palace_path)
@@ -756,7 +756,7 @@ class MempalaceConfig:
         for per-palace daemon state in ``daemon.py`` and per-palace
         server-registry state in ``server_registry.py``), so that two palaces
         whose directories share the same parent no longer collide on one
-        shared hallways file on disk (#2710). Mirrors ``tunnel_file``.
+        shared hallways file on disk. Mirrors ``tunnel_file``.
 
         The records live in ``hallways.sqlite3`` beside this path; the first
         hallway write imports this file once (see
