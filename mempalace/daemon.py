@@ -797,7 +797,7 @@ def _close_or_defer_writer_lease(
         writer_lease.close()
 
 
-# --- Foreground/lifecycle logging (#2475) ---------------------------------
+# --- Foreground/lifecycle logging -------------------------------------------
 #
 # run_server (both the foreground in-process path and the detached ``serve``
 # child) emitted no structured output of its own: the HTTP handler's
@@ -1059,7 +1059,7 @@ def run_server(palace_path: str, *, backend: str | None = None, port: int = 0) -
     # sidecars, and any future artifact — and is restored in the finally below.
     # Ensure the daemon's own lifecycle lines actually reach stdout/stderr:
     # without this a foreground or ``serve`` daemon was silent to any
-    # supervisor that captures those streams (#2475).
+    # supervisor that captures those streams.
     _ensure_lifecycle_logging()
     try:
         with _Server((HOST, port), _Handler) as httpd:
