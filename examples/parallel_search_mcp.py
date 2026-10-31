@@ -81,7 +81,6 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
-from uuid import uuid4
 
 # ── Parallel Search MCP (no API key for basic usage) ──────────────────
 PARALLEL_SEARCH_MCP_URL = "https://search.parallel.ai/mcp"
@@ -91,13 +90,14 @@ DEFAULT_MEMPALACE_URL = "http://127.0.0.1:9090/mcp"
 
 # Provenance label recorded on every captured drawer so the stored text is
 # identified as *extracted page text* (never the original page bytes).
-PROVENANCE_SOURCE = "parallel_search_extraced_text"
+PROVENANCE_SOURCE = "parallel_search_extracted_text"
 ADDED_BY_LABEL = "parallel_search_example"
 
 # MCP client is isolated to this example.  Core MemPalace does not need it.
 try:  # pragma: no cover - exercised at runtime, not in offline tests
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
+
     HAS_MCP_CLIENT = True
 except ImportError:  # pragma: no cover
     ClientSession = None  # type: ignore[assignment]
@@ -125,9 +125,9 @@ class CapturedItem:
 
     wing: str
     room: str
-    content: str          # extracted page text, byte-for-byte
-    source_url: str       # URL the text was fetched from
-    captured_at: str      # ISO-8601 UTC
+    content: str  # extracted page text, byte-for-byte
+    source_url: str  # URL the text was fetched from
+    captured_at: str  # ISO-8601 UTC
     captured_by: str = ADDED_BY_LABEL
 
     def to_add_drawer_kwargs(self) -> dict:
@@ -201,8 +201,12 @@ def _post_jsonrpc(url: str, name: str, arguments: dict, token: str = "", id: int
 
     Used against MemPalace's MCP HTTP transport (``mempalace/mcp_server/http.py``).
     """
-    payload = {"jsonrpc": "2.0", "id": id, "method": "tools/call",
-               "params": {"name": name, "arguments": arguments}}
+    payload = {
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    }
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -230,8 +234,7 @@ def _post_jsonrpc(url: str, name: str, arguments: dict, token: str = "", id: int
     return result
 
 
-def file_captured(mcp_url: str, mcp_token: str, item: CapturedItem,
-                  dry_run: bool = False) -> dict:
+def file_captured(mcp_url: str, mcp_token: str, item: CapturedItem, dry_run: bool = False) -> dict:
     """Send a confirmed CapturedItem to MemPalace via ``mempalace_add_drawer``."""
     kwargs = item.to_add_drawer_kwargs()
     if dry_run:
@@ -247,6 +250,7 @@ def file_captured(mcp_url: str, mcp_token: str, item: CapturedItem,
 def _run(coro):
     """Run an MCP client coroutine on a fresh event loop."""
     import asyncio
+
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
@@ -292,11 +296,13 @@ async def parallel_search(query: str, max_results: int = 5) -> list[SearchResult
         except json.JSONDecodeError:
             continue
         for item in data.get("results", data.get("hits", [])):
-            hits.append(SearchResult(
-                title=item.get("title", ""),
-                url=item.get("url", item.get("link", "")),
-                description=item.get("description", item.get("snippet", "")),
-            ))
+            hits.append(
+                SearchResult(
+                    title=item.get("title", ""),
+                    url=item.get("url", item.get("link", "")),
+                    description=item.get("description", item.get("snippet", "")),
+                )
+            )
     return hits
 
 
@@ -333,8 +339,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--room", default="captured_web")
     p.add_argument("--json", action="store_true")
     p.add_argument("--quiet", action="store_true")
-    p.add_argument("--auto", action="store_true",
-                   help="Skip interactive pick + confirm (first result, auto-yes)")
+    p.add_argument(
+        "--auto",
+        action="store_true",
+        help="Skip interactive pick + confirm (first result, auto-yes)",
+    )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--max-results", type=int, default=5)
     return p.parse_args(argv)

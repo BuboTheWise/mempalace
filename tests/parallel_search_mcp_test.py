@@ -21,11 +21,25 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "examples"))
 
-import parallel_search_mcp as psm  # noqa: E402
-from _mcp_server_helpers import _patch_mcp_server  # noqa: E402
-
+import parallel_search_mcp as psm
+from _mcp_server_helpers import _patch_mcp_server
 
 # ── fixtures ───────────────────────────────────────────────────────────
+
+
+def _make_input(value):
+    """Build a drop-in ``builtins.input`` replacement that returns ``value``.
+
+    Hoisted to module scope so the fake does not capture a loop variable
+    (ruff B023).  ``confirm()`` calls ``input(prompt)`` — the prompt is a
+    positional arg — so the fake ignores it and returns the canned answer.
+    """
+
+    def _input(*_a, **_k):
+        return value
+
+    return _input
+
 
 
 @pytest.fixture
@@ -56,8 +70,12 @@ def fake_parallel(monkeypatch):
             assert tool_names == args or "search" in tool_names
             fake["search_calls"].append({"tools": list(tool_names), "args": dict(arguments)})
             _Result.content[0].text = json.dumps(
-                {"results": [{"title": r["title"], "url": r["url"],
-                              "description": r["snippet"]} for r in fake["results"]]}
+                {
+                    "results": [
+                        {"title": r["title"], "url": r["url"], "description": r["snippet"]}
+                        for r in fake["results"]
+                    ]
+                }
             )
         else:
             assert "url" in arguments
@@ -78,15 +96,24 @@ def fake_parallel(monkeypatch):
 
 class TestCancellation:
     def test_yes_variants_confirm(self, monkeypatch):
-        for value, expected in [("y", True), ("Y", True), ("yes", True),
-                                (" YES ", True), ("n", False), ("", False),
-                                ("no", False), ("x", False)]:
-            monkeypatch.setattr("builtins.input", lambda *a, **k: value)
+        for value, expected in [
+            ("y", True),
+            ("Y", True),
+            ("yes", True),
+            (" YES ", True),
+            ("n", False),
+            ("", False),
+            ("no", False),
+            ("x", False),
+        ]:
+
+            monkeypatch.setattr("builtins.input", _make_input(value))
             assert psm.confirm() is expected, value
 
     def test_eof_cancels(self, monkeypatch):
         def eof_input(*a, **k):
             raise EOFError
+
         monkeypatch.setattr("builtins.input", eof_input)
         assert psm.confirm() is False
 
@@ -95,7 +122,8 @@ class TestCancellation:
         MCP HTTP path — assert the transport is never invoked."""
         calls = []
         monkeypatch.setattr(
-            psm, "_post_jsonrpc",
+            psm,
+            "_post_jsonrpc",
             lambda *a, **k: calls.append((a, k)) or {"success": True, "drawer_id": "x"},
         )
         item = psm.build_captured("w", "r", "content", "https://example.com/a")
@@ -107,7 +135,8 @@ class TestCancellation:
     def test_confirmed_flow_files(self, fake_parallel, monkeypatch):
         calls = []
         monkeypatch.setattr(
-            psm, "_post_jsonrpc",
+            psm,
+            "_post_jsonrpc",
             lambda *a, **k: calls.append((a, k)) or {"success": True, "drawer_id": "d1"},
         )
         item = psm.build_captured("w", "r", "content", "https://example.com/a")
@@ -160,7 +189,9 @@ class TestTextPreservation:
 
 
 class TestRoundTrip:
-    def test_add_drawer_then_get_drawer_returns_exact_text(self, monkeypatch, config, collection, kg):
+    def test_add_drawer_then_get_drawer_returns_exact_text(
+        self, monkeypatch, config, collection, kg
+    ):
         """The exact kwargs the example produces flow through
         ``mempalace_add_drawer`` and ``mempalace_get_drawer`` byte-for-byte."""
         from mempalace import mcp_server
@@ -168,12 +199,18 @@ class TestRoundTrip:
         _patch_mcp_server(monkeypatch, config, kg)
 
         exact = (
-            "\ufeffBOM \u2014 exact text \u00e9\u00e8\u00ea\n"
-            "line2 with tab\tand emoji \U0001f600\n"
-        ) + ("x" * 4000) + "\n" + "final line"
+            (
+                "\ufeffBOM \u2014 exact text \u00e9\u00e8\u00ea\n"
+                "line2 with tab\tand emoji \U0001f600\n"
+            )
+            + ("x" * 4000)
+            + "\n"
+            + "final line"
+        )
         assert len(exact) < 100_000, len(exact)  # must fit comfortably within the 100k cap
-        item = psm.build_captured("research", "captured_web", exact,
-                                  "https://example.com/doc?section=2")
+        item = psm.build_captured(
+            "research", "captured_web", exact, "https://example.com/doc?section=2"
+        )
         kwargs = item.to_add_drawer_kwargs()
 
         added = mcp_server.tool_add_drawer(**kwargs)
@@ -184,22 +221,28 @@ class TestRoundTrip:
         assert "error" not in got, got
         assert got["content"] == exact, "recall must return the stored text byte-for-byte"
         # get_drawer strips source_file to Path(source_file).name
-        src = got["metadata"].get("source_file", "") if "metadata" in got else got.get("source_file", "")
+        src = (
+            got["metadata"].get("source_file", "")
+            if "metadata" in got
+            else got.get("source_file", "")
+        )
         assert "doc?section=2" in src, f"URL tail missing from source_file: {src!r}"
 
     def test_duplicate_file_is_idempotent(self, monkeypatch, config, collection, kg):
         from mempalace import mcp_server
 
         _patch_mcp_server(monkeypatch, config, kg)
-        kwargs = psm.build_captured("research", "captured_web",
-                                    "idempotent body",
-                                    "https://example.com/dup").to_add_drawer_kwargs()
+        kwargs = psm.build_captured(
+            "research", "captured_web", "idempotent body", "https://example.com/dup"
+        ).to_add_drawer_kwargs()
         first = mcp_server.tool_add_drawer(**kwargs)
         second = mcp_server.tool_add_drawer(**kwargs)
         assert first["success"] and second["success"]
         assert first["drawer_id"] == second["drawer_id"]
 
-    def test_roundtrip_of_parallel_stubbed_text(self, fake_parallel, monkeypatch, config, collection, kg):
+    def test_roundtrip_of_parallel_stubbed_text(
+        self, fake_parallel, monkeypatch, config, collection, kg
+    ):
         """End-to-end offline: stubbed Parallel fetch text → confirm → add → get."""
         from mempalace import mcp_server
 
@@ -232,9 +275,18 @@ class TestRoundTrip:
 def test_constants_and_public_api():
     assert psm.PARALLEL_SEARCH_MCP_URL == "https://search.parallel.ai/mcp"
     assert psm.DEFAULT_MEMPALACE_URL.startswith("http://")
-    for name in ("CapturedItem", "SearchResult", "build_captured", "preview",
-                 "confirm", "file_captured", "parallel_search", "parallel_fetch",
-                 "parse_args", "main"):
+    for name in (
+        "CapturedItem",
+        "SearchResult",
+        "build_captured",
+        "preview",
+        "confirm",
+        "file_captured",
+        "parallel_search",
+        "parallel_fetch",
+        "parse_args",
+        "main",
+    ):
         assert hasattr(psm, name), name
     assert not psm.ADDED_BY_LABEL or psm.ADDED_BY_LABEL.startswith("parallel_search")
 
