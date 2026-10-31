@@ -41,7 +41,6 @@ def _make_input(value):
     return _input
 
 
-
 @pytest.fixture
 def fake_parallel(monkeypatch):
     """Stub the Parallel Search MCP transport seam (offline network layer)."""
@@ -106,7 +105,6 @@ class TestCancellation:
             ("no", False),
             ("x", False),
         ]:
-
             monkeypatch.setattr("builtins.input", _make_input(value))
             assert psm.confirm() is expected, value
 
