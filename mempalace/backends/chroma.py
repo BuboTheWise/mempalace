@@ -35,6 +35,7 @@ from .base import (
     UnsupportedFilterError,
     _IncludeSpec,
 )
+from .embedding_wrapper import EmbeddingCollection
 
 logger = logging.getLogger(__name__)
 
