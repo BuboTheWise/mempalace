@@ -148,9 +148,51 @@ class KnowledgeGraph:
             db_parent.chmod(0o700)
         except (OSError, NotImplementedError):
             pass
+        self._prune_empty_db_file()
         self._connection = None
         self._lock = threading.Lock()
         self._init_db()
+
+    def _prune_empty_db_file(self) -> None:
+        """Remove a 0-byte main file that can never hold a SQLite database.
+
+        A bare ``sqlite3.connect()`` followed by ``close()`` with no executed
+        statements leaves a 0-byte file behind (the same artifact documented
+        at ``backends/sqlite_exact.py`` / #1893). SQLite tolerates a 0-byte
+        file as an empty database, so ``CREATE TABLE IF NOT EXISTS`` heals it
+        on open — but only once something actually opens the KG. Callers that
+        treat the file's *presence* as "a knowledge graph exists" (the
+        ``repair`` presence gate, MemChorus's ``_kg_db_path``, #337) see a
+        present graph with no tables and report the KG as non-functional.
+        Pruning the 0-byte file makes the next ``_init_db`` build the schema
+        from scratch, and leaves a size that unambiguously means "a database".
+
+        A non-empty ``-wal`` sidecar is always preserved: a WAL frame stream
+        can hold the complete database image, and SQLite recovers a missing
+        or zero-length main file from its WAL on open.
+        """
+        main = Path(self.db_path)
+        try:
+            if not main.is_file() or main.stat().st_size > 0:
+                return
+        except OSError:
+            return
+        wal = main.with_name(main.name + "-wal")
+        try:
+            if wal.is_file() and wal.stat().st_size > 0:
+                return
+        except OSError:
+            pass
+        try:
+            main.unlink()
+        except OSError:
+            pass
+        shm = main.with_name(main.name + "-shm")
+        try:
+            if shm.is_file() and shm.stat().st_size == 0:
+                shm.unlink()
+        except OSError:
+            pass
 
     def _init_db(self):
         conn = self._conn()

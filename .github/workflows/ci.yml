@@ -8,10 +8,21 @@ on:
 
 jobs:
   test-linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        include:
+          # Python 3.9 is EOL and no longer ships on ubuntu-26.04 (the current
+          # `ubuntu-latest`), which fails setup-python with "version '3.9' ...
+          # not found for Ubuntu 26.04". Run 3.9 on the last image that still
+          # provides it; 3.11/3.13 stay on the default image. See MemChorus #337.
+          - python-version: "3.9"
+            os: ubuntu-24.04
+          - python-version: "3.11"
+            os: ubuntu-latest
+          - python-version: "3.13"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
