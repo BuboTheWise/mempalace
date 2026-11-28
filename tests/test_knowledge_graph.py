@@ -5,6 +5,8 @@ Covers: entity CRUD, triple CRUD, temporal queries, invalidation,
 timeline, stats, and edge cases (duplicate triples, ID collisions).
 """
 
+import os
+
 import pytest
 import sqlite3
 from mempalace.knowledge_graph import KnowledgeGraph
@@ -433,3 +435,66 @@ class TestCandidateResolution:
         assert kg.query_entity("%") == []
         assert kg.query_entity("_") == []
         assert kg.query_entity("100%") == []
+
+
+class TestZeroByteInitialization:
+    """#337: a 0-byte KG file (the bare-``sqlite3.connect()`` artifact, see
+    ``backends/sqlite_exact.py``) must be healed by schema creation on first
+    connection — the file may never stay 0 bytes after a KG is constructed."""
+
+    def test_missing_file_creates_schema_on_first_connection(self, tmp_dir):
+        db_path = os.path.join(tmp_dir, "fresh", "knowledge_graph.sqlite3")
+        assert not os.path.exists(db_path)
+
+        kg = KnowledgeGraph(db_path=db_path)
+        try:
+            assert os.path.getsize(db_path) > 0
+            tables = {
+                r[0]
+                for r in kg._conn().execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            assert {"entities", "triples"} <= tables
+            kg.add_triple("Alice", "knows", "Bob")
+            assert len(kg.query_entity("Alice")) == 1
+        finally:
+            kg.close()
+
+    def test_zero_byte_file_is_healed_on_first_connection(self, tmp_dir):
+        db_path = os.path.join(tmp_dir, "palace", "knowledge_graph.sqlite3")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        with open(db_path, "wb"):
+            pass  # 0-byte artifact, the production state from #337
+        assert os.path.getsize(db_path) == 0
+
+        kg = KnowledgeGraph(db_path=db_path)
+        try:
+            assert os.path.getsize(db_path) > 0
+            assert kg.stats()["entities"] == 0
+            kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
+            res = kg.query_entity("Max")
+            assert len(res) == 1
+            assert res[0]["object"] == "swimming"
+        finally:
+            kg.close()
+
+    def test_zero_byte_main_with_non_empty_wal_is_recovered(self, tmp_dir):
+        # A 0-byte main file beside a live WAL frame stream must not be
+        # pruned: the WAL can hold the complete database image.
+        db_path = os.path.join(tmp_dir, "crashed", "knowledge_graph.sqlite3")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+        kg = KnowledgeGraph(db_path=db_path)
+        kg.add_triple("Alice", "works_at", "Acme")
+        wal_path = db_path + "-wal"
+        assert os.path.getsize(wal_path) > 0  # committed frames, not yet checkpointed
+        with open(db_path, "wb"):
+            pass  # simulate a crash truncating the main file to 0 bytes
+        kg.close()
+
+        kg2 = KnowledgeGraph(db_path=db_path)
+        try:
+            assert os.path.getsize(db_path) > 0
+            res = kg2.query_entity("Alice")
+            assert any(r["object"] == "Acme" for r in res)
+        finally:
+            kg2.close()
