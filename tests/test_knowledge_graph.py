@@ -451,9 +451,7 @@ class TestZeroByteInitialization:
             assert os.path.getsize(db_path) > 0
             tables = {
                 r[0]
-                for r in kg._conn().execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                for r in kg._conn().execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             assert {"entities", "triples"} <= tables
             kg.add_triple("Alice", "knows", "Bob")
